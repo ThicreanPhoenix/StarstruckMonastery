@@ -877,7 +877,7 @@ public class AddMonsters
                 },
                 ProvideMainAction = delegate (QEffect qf)
                 {
-                    CombatAction action = new CombatAction(qf.Owner, IllustrationName.Rage, "Opening Statement", new Trait[] { Trait.Auditory, Trait.Concentrate }, qf.Owner.Name + " lists the alleged crimes of one of its foes.",
+                    CombatAction action = new CombatAction(qf.Owner, IllustrationName.Rage, "Opening Statement", new Trait[] { Trait.Auditory, Trait.Concentrate }, qf.Owner.Name + " lists the alleged crimes of one of its foes. If it succeeds, it deals an additional 2d6 precision damage with its Strikes against that creature (4d6 on a crit success).",
                             Target.Ranged(20).WithAdditionalConditionOnTargetCreature((attacker, defender) => attacker.Actions.TakenAnyActionThisTurn ? Usability.NotUsable("not start of turn") : !attacker.CanSee(defender) ? Usability.NotUsableOnThisCreature("cannot see") : Usability.Usable))
                         .WithActionCost(0)
                         .WithProjectileCone(IllustrationName.Demoralize, 24, ProjectileKind.Cone)
