@@ -24,6 +24,7 @@ using Microsoft.Xna.Framework;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using Dawnsbury.Core.CharacterBuilder.FeatsDb.Spellbook;
 
 namespace Dawnsbury.Mods.Phoenix.AdventureMonsters;
 
@@ -134,28 +135,13 @@ public class AddMonsters
                             {
                                 return new ActionPossibility(new CombatAction(qf.Owner, IllustrationName.AncientDust, "Cough", new Trait[] { }, qf.Owner.Name + " coughs and sneezes.", Target.Self())
                                     .WithActionCost(1)
+                                    .WithGoodness((_, _, _) => AIConstants.ALWAYS)
                                     .WithEffectOnEachTarget(async (spell, caster, target, result) =>
                                     {
-                                        caster.Occupies.Overhead("Achoo!", Color.Black);
+                                        caster.Overhead("Achoo!", Color.Black);
                                         qf.ExpiresAt = ExpirationCondition.Immediately;
                                     }));
                             },
-                            /*
-                            StartOfYourPrimaryTurn = async delegate (QEffect effect, Creature you)
-                            {
-                                if (you.Actions.CanTakeActions())
-                                {
-                                    CombatAction sneeze = new CombatAction(you, IllustrationName.AncientDust, "Cough", new Trait[] { }, you.Name + " coughs and sneezes.", Target.Self())
-                                        .WithActionCost(1)
-                                        .WithEffectOnEachTarget(async (spell, caster, target, result) =>
-                                        {
-                                            caster.Occupies.Overhead("Achoo!", Color.Black);
-                                        });
-                                    await you.Battle.GameLoop.FullCast(sneeze);
-                                    you.RemoveAllQEffects((QEffect qf) => qf.Name == "Dusted");
-                                }
-                            },
-                            */
                             Key = "Dusted"
                         });
                     }
@@ -188,16 +174,18 @@ public class AddMonsters
             .AddQEffect(QEffect.DamageImmunity(DamageKind.Bleed))
             .AddQEffect(QEffect.DamageImmunity(DamageKind.Poison))
             .AddQEffect(QEffect.TraitImmunity(Trait.Sleep))
+            //.AddQEffect(QEffect.BreathWeapon("a cloud of dust", Target.FifteenFootCone(), Defense.Reflex, 17, DamageKind.Slashing, DiceFormula.FromText("2d6", "Breath Weapon"), SfxName.AncientDust, null))
             .AddQEffect(new QEffect
             {
-                ProvideMainAction = (QEffect qf) => new ActionPossibility(new CombatAction(qf.Owner, IllustrationName.ElectricArc, "Breath Weapon", new Trait[]
+                ProvideMainAction = (QEffect qf) => new ActionPossibility(new CombatAction(qf.Owner, IllustrationName.BreathWeapon, "Breath Weapon", new Trait[]
                 {
                         Trait.Arcane,
                         Trait.Air,
                         Trait.Earth,
-                }, "Deal 2d6 slashing damage in a 15-foot cone (DC 17 basic Reflex save). You can't use Breath Weapon again for 1d4 rounds.", Target.FifteenFootCone()).WithActionCost(2).WithProjectileCone(IllustrationName.AncientDust, 25, ProjectileKind.Cone).WithSavingThrow(new SavingThrow(Defense.Reflex, (Creature? _) => 17))
+                }, "Deal 2d6 slashing damage in a 15-foot cone (DC 17 basic Reflex save). You can't use Breath Weapon again for 1d4 rounds.", Target.FifteenFootCone()).WithActionCost(2).WithProjectileCone(IllustrationName.BreathWeapon, 25, ProjectileKind.Cone).WithSavingThrow(new SavingThrow(Defense.Reflex, (Creature? _) => 17))
                     .WithGoodnessAgainstEnemy((Target tg, Creature a, Creature d) => 7.5f)
                     .WithSoundEffect(SfxName.AncientDust)
+                    .WithActionId(ActionId.BreathWeapon)
                     .WithEffectOnEachTarget(async delegate (CombatAction spell, Creature caster, Creature target, CheckResult result)
                     {
                         await CommonSpellEffects.DealBasicDamage(spell, caster, target, result, "2d6", DamageKind.Slashing);
@@ -251,7 +239,7 @@ public class AddMonsters
                             if (result >= CheckResult.Success)
                             {
                                 target.OwningFaction = caster.OwningFaction;
-                                target.Occupies.Overhead("convinced", Color.Yellow, target.Name + " is now fighting for " + caster.Name);
+                                target.Overhead("convinced", Color.Yellow, target.Name + " is now fighting for " + caster.Name);
                             }
                         }));
                 }
@@ -474,23 +462,13 @@ public class AddMonsters
             }
         })
         .WithFeat(FeatName.Swipe)
-        .AddQEffect(new QEffect("The Sea's Revenge", "The creature that slays the draugr must succeed at a DC 17 Will save or become cursed until downtime. On a failure, the creature is sickened 1 (sickened 2 on a critical failure), and cannot reduce their sickened value below 1. On a success, the creature is sickened but can remove the condition normally.")
+        .AddQEffect(new QEffect("The Sea's Revenge", "The creature that slays the draugr must make a saving throw against the {i}mariner's curse{/i} spell with a DC of 19.")
         {
             YouAreDealtLethalDamage = async (qf, attacker, stuff, defender) =>
             {
-                CheckResult result = CommonSpellEffects.RollSavingThrow(attacker, CombatAction.CreateSimple(defender, "The Sea's Revenge", new Trait[] { Trait.Curse, Trait.Divine, Trait.Necromancy }), Defense.Will, 17);
-                switch (result)
-                {
-                    case CheckResult.Success:
-                        attacker.AddQEffect(QEffect.Sickened(1, 17));
-                        break;
-                    case CheckResult.Failure:
-                        attacker.AddQEffect(CreateSeasRevengeEffect(1, 17));
-                        break;
-                    case CheckResult.CriticalFailure:
-                        attacker.AddQEffect(CreateSeasRevengeEffect(2, 17));
-                        break;
-                }
+                CombatAction spell = AllSpells.CreateSpellInCombat(SpellId.MarinersCurse, defender, 2, Trait.None).WithActionCost(0).WithSavingThrow(new SavingThrow(Defense.Will, 19));
+                spell.ChosenTargets = ChosenTargets.CreateSingleTarget(attacker);
+                await spell.AllExecute();
                 return null;
             }
         })
@@ -804,7 +782,7 @@ public class AddMonsters
     {
         return new Creature(new ModdedIllustration("PhoenixAssets/HellboundAttorney.PNG"),
             "Hellbound Attorney",
-            new Trait[] { Trait.Lawful, Trait.Evil, Trait.Fiend, Trait.Humanoid, Trait.Human },
+            new Trait[] { Trait.Lawful, Trait.Evil, Trait.Fiend, Trait.Humanoid, Trait.Human, Trait.Devil },
             4, 11, 4,
             new Defenses(20, 9, 12, 13),
             60,
