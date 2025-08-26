@@ -25,6 +25,7 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using Dawnsbury.Core.CharacterBuilder.FeatsDb.Spellbook;
+using Dawnsbury.Campaign.Encounters;
 
 namespace Dawnsbury.Mods.Phoenix.AdventureMonsters;
 
@@ -37,8 +38,6 @@ public class AddMonsters
     public static QEffectId VortexArcanaActor = ModManager.RegisterEnumMember<QEffectId>("VortexArcanaActor");
     public static QEffectId VortexReligionTarget = ModManager.RegisterEnumMember<QEffectId>("VortexReligionTarget");
     public static QEffectId VortexReligionActor = ModManager.RegisterEnumMember<QEffectId>("VortexReligionActor");
-    public static QEffectId SilverDoorTarget = ModManager.RegisterEnumMember<QEffectId>("SilverDoorTarget");
-    public static QEffectId SilverDoorActor = ModManager.RegisterEnumMember<QEffectId>("SilverDoorActor");
     public static CreatureId AnimatedBroomId = ModManager.RegisterEnumMember<CreatureId>("AnimatedBroom");
     public static CreatureId DustMephitId = ModManager.RegisterEnumMember<CreatureId>("DustMephit");
     public static CreatureId NaiadId = ModManager.RegisterEnumMember<CreatureId>("Naiad");
@@ -695,87 +694,45 @@ public class AddMonsters
 
     public static Creature CreateSilverDoor()
     {
-        return new Creature(new ModdedIllustration("PhoenixAssets/SilverDoor.png"), "Silver Door", new List<Trait>
+        Creature silverDoor = Doors.CreateBasicDoor();
+        silverDoor.Illustration = new ModdedIllustration("PhoenixAssets/SilverDoor.png");
+        silverDoor.WithCreatureId(SilverDoorId);
+        silverDoor.AddQEffect(Doors.LockedDoor("Locked", "This great silver door is set with a great many locks. These locks can be picked with a DC 20 Thievery check.", 20));
+        silverDoor.RemoveAllQEffects((QEffect qf) => qf.Id == QEffectId.LockPickObject);
+        silverDoor.AddQEffect(new QEffect()
+        {
+            Name = "Locked",
+            Description = "These great silver doors are set with a great many locks. These locks can be picked with a DC 20 Thievery check.",
+            Innate = true
+        }.AddAllowActionOnSelf(QEffectId.LockPickUser, QEffectId.LockPickObject, (Creature rogue) => new ActionPossibility(new CombatAction(rogue, IllustrationName.OpenLock, "Pick lock", new Trait[1] { Trait.Manipulate }, $"Make a Thievery check against DC 20. On a success or a critical success, you unlock and open the door.", Target.Touch()).WithActionCost(2).WithActionId(ActionId.PickLock).WithSoundEffect(SfxName.DisableDevice)
+            .WithActiveRollSpecification(new ActiveRollSpecification(TaggedChecks.SkillCheck(Skill.Thievery), Checks.FlatDC(20)))
+            .WithEffectOnEachTarget(async delegate (CombatAction spell, Creature caster, Creature target, CheckResult result)
             {
-                Trait.Indestructible,
-                Trait.Object
-            }, 2, 0, 0, new Defenses(0, 0, 0, 0), 1, new Abilities(0, 0, 0, 0, 0, 0), new Skills()).WithHardness(1000).WithEntersInitiativeOrder(entersInitiativeOrder: false).WithTactics(Tactic.DoNothing)
-            .AddQEffect(new QEffect
-            {
-                PreventTargetingBy = (CombatAction ca) => (!ca.HasTrait(Trait.Interact)) ? "Interact-only" : null
-            })
-            .AddQEffect(QEffect.OutOfCombat(null, null, true))
-            .WithSpawnAsGaia()
-            .WithCreatureId(SilverDoorId)
-            .AddQEffect(new QEffect().AddAllowActionOnSelf(SilverDoorActor, SilverDoorTarget, (creature) =>
-            {
-                return new ActionPossibility(new CombatAction(creature, IllustrationName.OpenLock, "Pick a Lock", new Trait[]
+                if (result >= CheckResult.Success)
                 {
-                        Trait.BypassesOutOfCombat,
-                        Trait.Manipulate,
-                        Trait.Basic
-                }, "Attempt to pick one of the locks on the silver door.", Target.Touch())
-                    .WithActionCost(1)
-                    .WithActiveRollSpecification(new ActiveRollSpecification(TaggedChecks.SkillCheck(Skill.Thievery), Checks.FlatDC(20)))
-                    .WithEffectOnEachTarget(async (spell, caster, target, result) =>
+                    target.RemoveAllQEffects((QEffect qf) => qf.Id == QEffectId.LockPickObject);
+                    int i = 0;
+                    List<Creature> list = new List<Creature>();
+                    foreach (Creature c in target.Battle.AllCreatures)
                     {
-                        Creature azer = caster.Battle.AllSpawnedCreatures.FirstOrDefault((Creature c) => c.CreatureId == AzerId);
-                        switch (result)
+                        if (c.HasEffect(QEffectId.LockPickObject))
                         {
-                            case CheckResult.CriticalSuccess:
-                                target.RemoveAllQEffects(qf => qf.Id == SilverDoorTarget);
-                                int i = 0;
-                                List<Creature> list = new List<Creature>();
-                                foreach (Creature c in target.Battle.AllCreatures)
-                                {
-                                    if (c.HasEffect(SilverDoorTarget))
-                                    {
-                                        list.Add(c);
-                                        i++;
-                                    }
-                                }
-                                if (i == 0 && azer != default)
-                                {
-                                    await azer.Battle.Cinematics.PlayCutscene(async delegate (Cinematics cinematics)
-                                    {
-                                        await cinematics.LineAsync(azer, "No! The doors cannot be opened! I'll--gaaah!");
-                                    });
-                                    azer.Die();
-                                }
-                                Creature extra = list.GetRandom();
-                                extra.RemoveAllQEffects(qf => qf.Id == SilverDoorTarget);
-                                i--;
-                                if (i == 0 && azer != default)
-                                {
-                                    await azer.Battle.Cinematics.PlayCutscene(async delegate (Cinematics cinematics)
-                                    {
-                                        await cinematics.LineAsync(azer, "No! The doors cannot be opened! I'll--gaaah!");
-                                    });
-                                    azer.Die();
-                                }
-                                break;
-                            case CheckResult.Success:
-                                target.RemoveAllQEffects(qf => qf.Id == SilverDoorTarget);
-                                int i2 = 0;
-                                foreach (Creature c in target.Battle.AllCreatures)
-                                {
-                                    if (c.HasEffect(SilverDoorTarget))
-                                    {
-                                        i2++;
-                                    }
-                                }
-                                if (i2 == 0 && azer != default)
-                                {
-                                    await azer.Battle.Cinematics.PlayCutscene(async delegate (Cinematics cinematics)
-                                    {
-                                        await cinematics.LineAsync(azer, "No! The doors cannot be opened! I'll--gaaah!");
-                                    });
-                                    azer.Die();
-                                }
-                                break;
+                            list.Add(c);
+                            i++;
                         }
-                    })).WithPossibilityGroup("Interactions");
-            }));
+                    }
+                    Creature azer = caster.Battle.AllSpawnedCreatures.FirstOrDefault((Creature c) => c.CreatureId == AzerId);
+                    if (i == 0 && azer != default)
+                    {
+                        await azer.Battle.Cinematics.PlayCutscene(async delegate (Cinematics cinematics)
+                        {
+                            await cinematics.LineAsync(azer, "No! The doors cannot be opened! I'll--gaaah!");
+                        });
+                        azer.Die();
+                    }
+                }
+            })).WithPossibilityGroup("Interactions")));
+        return silverDoor;
     }
 
     public static Creature CreateHellboundAttorney()
@@ -1085,6 +1042,26 @@ public class AddMonsters
         ModManager.RegisterNewCreature("SilverDoor", (encounter) =>
         {
             return CreateSilverDoor();
+        });
+
+        ModManager.RegisterCodeHook("InitializeSilverDoorFight", async delegate (TBattle battle)
+        {
+            Creature wisp1 = battle.Cinematics.FindCreatureAtTile(3, 3);
+            wisp1.AddQEffect(new QEffect()
+            {
+                WhenMonsterDies = async (qf) =>
+                {
+                    await qf.Owner.Battle.Cinematics.ShowQuickBubble(wisp1, "I'm die. Thank you forever.", null);
+                }
+            });
+            Creature wisp2 = battle.Cinematics.FindCreatureAtTile(8, 2);
+            wisp2.AddQEffect(new QEffect()
+            {
+                WhenMonsterDies = async (qf) =>
+                {
+                    await qf.Owner.Battle.Cinematics.ShowQuickBubble(wisp1, "An eternity traded for a life...", null);
+                }
+            });
         });
 
         ModManager.RegisterNewCreature("HellboundAttorney", (encounter) =>
