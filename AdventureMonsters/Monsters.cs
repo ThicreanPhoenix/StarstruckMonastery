@@ -26,11 +26,15 @@ using System.Linq;
 using System.Collections.Generic;
 using Dawnsbury.Core.CharacterBuilder.FeatsDb.Spellbook;
 using Dawnsbury.Campaign.Encounters;
+using Dawnsbury.Core.Mechanics.Zoning;
+using Dawnsbury.Core.Animations.AuraAnimations;
+using Dawnsbury.Core.Mechanics.Targeting.TargetingRequirements;
 
 namespace Dawnsbury.Mods.Phoenix.AdventureMonsters;
 
 public class AddMonsters
 {
+    public static QEffectId NaiadGardenCalmAnimalTarget = ModManager.RegisterEnumMember<QEffectId>("NaiadGardenCalmAnimalTarget");
     public static QEffectId OpeningStatementTarget = ModManager.RegisterEnumMember<QEffectId>("OpeningStatementTarget");
     public static QEffectId ShrinePrayTarget = ModManager.RegisterEnumMember<QEffectId>("ShrinePrayTarget");
     public static QEffectId ShrinePrayPrayer = ModManager.RegisterEnumMember<QEffectId>("ShrinePrayPrayer");
@@ -51,47 +55,6 @@ public class AddMonsters
     public static CreatureId HellboundAttorneyId = ModManager.RegisterEnumMember<CreatureId>("HellboundAttorney");
     public static CreatureId DemonicConflagrationId = ModManager.RegisterEnumMember<CreatureId>("DemonicConflagration");
     public static CreatureId DemonicBlobId = ModManager.RegisterEnumMember<CreatureId>("DemonicBlob");
-    public static QEffect CreateSeasRevengeEffect(int value, int dc)
-    {
-        QEffect sick = new QEffect()
-        {
-            Name = "Sickened (Mariner's Curse)",
-            Illustration = IllustrationName.Sickened,
-            Description = "You take a status penalty equal to the value to all your checks and DCs.\n\nYou can't drink elixirs or potions, or be administered elixirs or potions unless you're unconscious.\n\nYou can't lower the value of this condition below 1.",
-            Value = value,
-            Id = QEffectId.Sickened,
-            Tag = dc,
-            BonusToAllChecksAndDCs = (QEffect qf) => new Bonus(-qf.Value, BonusType.Status, "sickened"),
-            PreventTakingAction = (CombatAction ca) => (ca.ActionId != ActionId.Drink) ? null : "You're sickened.",
-            ProvideContextualAction = delegate (QEffect qf)
-            {
-                if (qf.Value > 1)
-                {
-                    QEffect qf3 = qf;
-                    return new ActionPossibility(new CombatAction(qf3.Owner, IllustrationName.Retch, "Retch", Array.Empty<Trait>(), "Make a fortitude save against DC " + dc + ". On a success, the sickened value is reduced by 1 (or by 2 on a critical success).", Target.Self()).WithActionId(ActionId.Retch).WithSavingThrow(new SavingThrow(Defense.Fortitude, dc)).WithEffectOnEachTarget(async delegate (CombatAction spell, Creature a, Creature cr, CheckResult ck)
-                    {
-                        if (ck >= CheckResult.Success)
-                        {
-                            qf3.Value -= ((ck != CheckResult.CriticalSuccess) ? 1 : 2);
-                            if (qf3.Value <= 0)
-                            {
-                                qf3.Value = 1;
-                            }
-                        }
-                    })).WithPossibilityGroup("Remove debuff");
-                }
-                else return null;
-            },
-            EndOfCombat = async delegate (QEffect effect, bool victory)
-            {
-                effect.Owner.LongTermEffects?.Add(WellKnownLongTermEffects.CreateLongTermEffect("SeasRevenge", "You are sickened and cannot lower the value below 1", dc));
-            },
-            LongTermEffectDuration = LongTermEffectDuration.UntilDowntime,
-            CountsAsADebuff = true
-        };
-        sick.PreventTargetingBy = (CombatAction ca) => (ca.ActionId != ActionId.Administer || sick.Owner.HasEffect(QEffectId.Unconscious)) ? null : "sickened";
-        return sick;
-    }
 
     public static Creature CreateAnimatedBroom()
     {
@@ -198,53 +161,22 @@ public class AddMonsters
 
     public static Creature CreateNaiad()
     {
-        return new Creature(new ModdedIllustration("PhoenixAssets/Naiad.PNG"), "Naiad", new Trait[] { Trait.Chaotic, Trait.Fey, Trait.Water },
+        return new Creature(new ModdedIllustration("PhoenixAssets/Naiad.PNG"), "Naiad", new Trait[] { Trait.Chaotic, Trait.Fey, Trait.Water, Trait.Female },
             1, 6, 5,
             new Defenses(16, 3, 6, 8),
             20,
             new Abilities(0, 3, 0, 1, 1, 4),
             new Skills(acrobatics: 6, athletics: 3, diplomacy: 7, nature: 6, stealth: 6, survival: 6))
-        {
-            SpawnAsFriends = true
-        }
         .WithBasicCharacteristics()
         .WithCreatureId(NaiadId)
         .WithTactics(Tactic.Standard)
-        .With(delegate (Creature cr)
-        {
-            cr.Characteristics.DeathSoundEffect = SfxName.FemaleDeath;
-        })
         .WithProficiency(Trait.Weapon, Proficiency.Expert)
         .AddQEffect(QEffect.DamageResistance(DamageKind.Fire, 3))
         .AddQEffect(QEffect.DamageWeakness(Trait.ColdIron, 3))
         .WithUnarmedStrike(new Item(IllustrationName.Fist, "aqueous fist", new Trait[] { Trait.Melee, Trait.Agile, Trait.Finesse, Trait.Water, Trait.Magical })
             .WithWeaponProperties(new WeaponProperties("1d6", DamageKind.Bludgeoning)))
-        //.AddMonsterInnateSpellcasting(7, Trait.Primal, new SpellId[] { SpellId.TidalSurge })
-        //Monsters don't seem able to use focus spells. Without that and without the Charm spell, the naiad's spellcasting isn't very useful.
-        .AddQEffect(new QEffect("Wild Empathy", "The dryad can use its Diplomacy to convince an Animal to help it instead of fighting.")
-        {
-            ProvideActionIntoPossibilitySection = delegate (QEffect qf, PossibilitySection section)
-            {
-                if (section.PossibilitySectionId == PossibilitySectionId.SkillActions)
-                {
-                    return new ActionPossibility(new CombatAction(qf.Owner, IllustrationName.Command, "Request Aid", new Trait[] { Trait.Auditory, Trait.Concentrate, Trait.Linguistic, Trait.Mental },
-                        "The naiad asks one adjacent creature with the animal trait to aid it, making a Diplomacy check against its Will DC. If the naiad succeeds, the animal joins the naiad's side in combat.",
-                        Target.Touch().WithAdditionalConditionOnTargetCreature((a, b) => !b.HasTrait(Trait.Animal) ? Usability.NotUsableOnThisCreature("Not an animal") : Usability.Usable))
-                        .WithActionCost(1)
-                        .WithActiveRollSpecification(new ActiveRollSpecification(TaggedChecks.SkillCheck(Skill.Diplomacy), Checks.DefenseDC(Defense.Will)))
-                        .WithGoodness((a, b, c) => AIConstants.EXTREMELY_PREFERRED)
-                        .WithEffectOnEachTarget(async (spell, caster, target, result) =>
-                        {
-                            if (result >= CheckResult.Success)
-                            {
-                                target.OwningFaction = caster.OwningFaction;
-                                target.Overhead("convinced", Color.Yellow, target.Name + " is now fighting for " + caster.Name);
-                            }
-                        }));
-                }
-                else return null;
-            }
-        });
+        .AddMonsterInnateSpellcasting(7, Trait.Primal, new SpellId[] { SpellId.TidalSurge })
+        .AddQEffect(Level2Spells.SpeakWithAnimalsQEffect());
     }
 
     public static Creature CreateHellHound()
@@ -465,7 +397,7 @@ public class AddMonsters
         {
             YouAreDealtLethalDamage = async (qf, attacker, stuff, defender) =>
             {
-                CombatAction spell = AllSpells.CreateSpellInCombat(SpellId.MarinersCurse, defender, 2, Trait.None).WithActionCost(0).WithSavingThrow(new SavingThrow(Defense.Will, 19));
+                CombatAction spell = AllSpells.CreateSpellInCombat(SpellId.MarinersCurse, defender, 2, Trait.None).WithActionCost(0).WithSavingThrow(new SavingThrow(Defense.Will, 19)).WithExtraTrait(Trait.DoesNotProvoke);
                 spell.ChosenTargets = ChosenTargets.CreateSingleTarget(attacker);
                 await spell.AllExecute();
                 return null;
@@ -501,42 +433,35 @@ public class AddMonsters
         .AddHeldItem(Items.CreateNew(Treasures.LightHammer))
         .AddQEffect(new QEffect("Heart of the Forge", "A creature who starts their turn within 10 feet of the azer must make a DC 16 Fortitude save or become fatigued from the radiating heat for as long as it stands in the azer's aura. Creatures with fire resistance are immune.")
         {
+            SpawnsAura = qf => new MagicCircleAuraAnimation(IllustrationName.KineticistAuraCircle, Color.OrangeRed, 2), 
             StateCheck = delegate (QEffect qf)
             {
-                foreach (Creature c in qf.Owner.Battle.AllCreatures.Where((Creature cr) => (cr.DistanceTo(qf.Owner) <= 2)))
+                if (qf.Zone == null)
                 {
-                    bool notresistanttofire = (c.WeaknessAndResistance.Resistances.FirstOrDefault((Resistance r) => r.DamageKind == DamageKind.Fire) == default);
-                    bool notimmunetofire = !(c.WeaknessAndResistance.Immunities.Contains(DamageKind.Fire));
-                    bool notimmunetofatigue = (c.QEffects.FirstOrDefault((QEffect qf) => qf.ImmuneToCondition == QEffectId.Fatigued) == default);
-                    bool notself = (c != qf.Owner);
-                    bool alreadyfatigued = c.HasEffect(QEffectId.Fatigued);
-                    if (notresistanttofire && notimmunetofire && notimmunetofatigue && notself && !alreadyfatigued)
+                    qf.Zone = Zone.Spawn(qf.Owner, ZoneAttachment.Aura(2)).WithOncePerRoundEffectWhenCreatureBeginsTurnOrEnters(async delegate (Creature creature)
                     {
-                        c.AddQEffect(new QEffect()
+                        bool notresistanttofire = (creature.WeaknessAndResistance.Resistances.FirstOrDefault((Resistance r) => r.DamageKind == DamageKind.Fire) == default);
+                        bool notimmunetofire = !(creature.WeaknessAndResistance.Immunities.Contains(DamageKind.Fire));
+                        bool notimmunetofatigue = (creature.QEffects.FirstOrDefault((QEffect qf) => qf.ImmuneToCondition == QEffectId.Fatigued) == default);
+                        bool notself = (creature != qf.Owner);
+                        bool alreadyfatigued = creature.HasEffect(QEffectId.Fatigued);
+                        if (notresistanttofire && notimmunetofire && notimmunetofatigue && notself && !alreadyfatigued)
                         {
-                            Name = "Heart of the Forge",
-                            Illustration = IllustrationName.Fatigued,
-                            Description = "You must make a DC 16 Fortitude save at the beginning of your turn or become fatigued due to " + qf.Owner.Name + "'s heat.",
-                            ExpiresAt = ExpirationCondition.Ephemeral,
-                            StartOfYourTurn = async delegate (QEffect fct, Creature creature)
+                            CombatAction action = CombatAction.CreateSimple(qf.Owner, "Heart of the Forge", new Trait[] { Trait.Aura, Trait.Fire });
+                            CheckResult result = CommonSpellEffects.RollSavingThrow(creature, action, Defense.Fortitude, 16);
+                            if (result <= CheckResult.Failure)
                             {
-                                if (!creature.HasEffect(QEffectId.Fatigued))
+                                creature.AddQEffect(new QEffect("Fatigued (Heart of the Forge)", "You take a -1 status penalty to AC and saving throws while within " + qf.Owner.Name + "'s aura.", ExpirationCondition.Never, null, IllustrationName.Fatigued)
                                 {
-                                    CheckResult result = CommonSpellEffects.RollSavingThrow(creature, CombatAction.CreateSimple(fct.Owner, "Heart of the Forge"), Defense.Fortitude, 16);
-                                    if (result <= CheckResult.Failure)
-                                    {
-                                        creature.AddQEffect(new QEffect("Fatigued (Heart of the Forge)", "You take a -1 status penalty to AC and saving throws while within " + qf.Owner.Name + "'s aura.", ExpirationCondition.Never, null, IllustrationName.Fatigued)
-                                        {
-                                            Key = "Fatigued (Heart of the Forge)",
-                                            Id = QEffectId.Fatigued,
-                                            BonusToDefenses = (QEffect qfSelf, CombatAction? combatAction, Defense defense) => (qfSelf.Owner.DistanceTo(qf.Owner) <= 2 && (defense == Defense.Reflex || defense == Defense.Will || defense == Defense.Fortitude || defense == Defense.AC)) ? new Bonus(-1, BonusType.Status, "Fatigued") : null,
-                                            CountsAsADebuff = true
-                                        });
-                                    }
-                                }
+                                    Key = "Fatigued (Heart of the Forge)",
+                                    Id = QEffectId.Fatigued,
+                                    BonusToDefenses = (QEffect qfSelf, CombatAction? combatAction, Defense defense) => (qf.Zone.CreaturesInZone.Contains(creature) && (defense == Defense.Reflex || defense == Defense.Will || defense == Defense.Fortitude || defense == Defense.AC)) ? new Bonus(-1, BonusType.Status, "Fatigued") : null,
+                                    CountsAsADebuff = true
+                                });
                             }
-                        });
-                    }
+                        }
+                        return true;
+                    });
                 }
             }
         })
@@ -992,16 +917,52 @@ public class AddMonsters
         ModManager.RegisterCodeHook("InitializeTheliphe", async delegate (TBattle battle)
         {
             Creature naiad = battle.Cinematics.FindCreatureAtTile(13,7);
-            naiad.AddQEffect(new QEffect()
+            naiad.Traits.Add(Trait.MustSurvive);
+        });
+
+        ModManager.RegisterCodeHook("InitializeNaiadGardenSnakes", async delegate (TBattle battle)
+        {
+            foreach (Creature c in battle.AllCreatures)
             {
-                StateCheckWithVisibleChanges = async (qf) =>
+                if (c.HasTrait(Trait.Animal) && c.OwningFaction == battle.Enemy)
                 {
-                    if (qf.Owner.DeathScheduledForNextStateCheck)
+                    c.AddQEffect(new QEffect()
                     {
-                        await qf.Owner.Battle.EndTheGame(false, qf.Owner.Name + " has died.");
-                    }
+                        Key = "NaiadGardenWildEmpathy",
+                        Id = NaiadGardenCalmAnimalTarget,
+                        StateCheck = async (qf) =>
+                        {
+                            foreach (Creature neighbor in qf.Owner.Neighbours.Creatures)
+                            {
+                                if (neighbor.HasEffect(QEffectId.SpeakWithAnimals))
+                                {
+                                    neighbor.AddQEffect(new QEffect()
+                                    {
+                                        ProvideContextualAction = delegate (QEffect effect)
+                                        {
+                                            return new ActionPossibility(new CombatAction(effect.Owner, IllustrationName.CalmEmotions, "Wild Empathy", new Trait[] { Trait.Auditory, Trait.Concentrate, /* Trait.Linguistic,*/ Trait.Mental }, "Attempt to convince the agitated snake to calm down by making a Diplomacy check against its Will DC.",
+                                                    Target.Touch().WithAdditionalConditionOnTargetCreature((a, d) => d.HasEffect(NaiadGardenCalmAnimalTarget) ? Usability.Usable : Usability.NotUsableOnThisCreature("invalid target")))
+                                                .WithActionCost(1)
+                                                .WithActiveRollSpecification(new ActiveRollSpecification(TaggedChecks.SkillCheck(Skill.Diplomacy), Checks.DefenseDC(Defense.Will)))
+                                                .WithGoodness((tg, self, foe) => AIConstants.EXTREMELY_PREFERRED)
+                                                .WithEffectOnEachTarget(async (spell, caster, target, result) =>
+                                                {
+                                                    if (result >= CheckResult.Success)
+                                                    {
+                                                        target.Overhead("convinced!", Color.Green, target.Name + " was convinced to fight on " + caster.Name + "'s behalf.");
+                                                        target.OwningFaction = target.Battle.GaiaFriends;
+                                                        target.RemoveAllQEffects((QEffect fct) => fct.Id == NaiadGardenCalmAnimalTarget);
+                                                    }
+                                                }));
+                                        },
+                                        ExpiresAt = ExpirationCondition.Ephemeral
+                                    });
+                                }
+                            }
+                        }
+                    });
                 }
-            });
+            }
         });
 
         ModManager.RegisterNewCreature("HellHound", (encounter) =>
@@ -1017,11 +978,6 @@ public class AddMonsters
         ModManager.RegisterNewCreature("DrownedMiner", (encounter) =>
         {
             return CreateDrownedMiner();
-        });
-        
-        LongTermEffects.EasyRegister("SeasRevenge", LongTermEffectDuration.UntilDowntime, (string _, int help) =>
-        {
-            return CreateSeasRevengeEffect(1, help);
         });
         
         ModManager.RegisterNewCreature("Draugr", (encounter) =>
